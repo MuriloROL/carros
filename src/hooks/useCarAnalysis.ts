@@ -6,11 +6,11 @@ export const useCarAnalysis = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const analyzeCar = useCallback(async (carModel: string) => {
+  const analyzeCar = useCallback(async (carModel: string, income: string) => {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await fetchCarAnalysis(carModel);
+      const result = await fetchCarAnalysis(carModel, income);
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido');

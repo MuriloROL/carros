@@ -34,8 +34,8 @@ export const DashboardStatus: React.FC<DashboardStatusProps> = ({ verdict, surpr
         <div className="z-10 relative">
           <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-1">Risco de Gastos Surpresa</h2>
           <p className="text-2xl font-bold text-slate-800">{formattedCost}</p>
-          <div className="mt-2 text-xs text-slate-500 max-w-[200px] leading-tight">
-            Financiamentos mal planejados e custos ocultos podem custar até <strong className="text-red-500">R$ 15.000</strong> a mais.
+          <div className="mt-2 text-xs text-slate-500 max-w-xs leading-tight">
+            Financiamentos mal planejados e custos ocultos podem custar até <strong className="text-red-500">{formattedCost}</strong> a mais no seu bolso.
           </div>
         </div>
       </div>

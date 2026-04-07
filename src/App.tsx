@@ -10,11 +10,13 @@ import { Search } from 'lucide-react';
 function App() {
   const { data, isLoading, error, analyzeCar } = useCarAnalysis();
   const [carModel, setCarModel] = useState('');
+  const [income, setIncome] = useState('Não informado');
+  const [isExpanded, setIsExpanded] = useState(false);
 
   const handleAnalyze = (e: React.FormEvent) => {
     e.preventDefault();
     if (!carModel.trim()) return;
-    analyzeCar(carModel);
+    analyzeCar(carModel, income);
   };
 
   return (
@@ -45,6 +47,43 @@ function App() {
               <span>Analisar Veículo</span>
             </button>
           </form>
+
+          {/* Expandable Table for Context */}
+          <div className="max-w-2xl mx-auto mt-4 text-left">
+            <button
+              type="button"
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-sm text-blue-600 font-medium hover:text-blue-800 flex items-center transition-colors"
+            >
+              <span className="mr-1">{isExpanded ? '−' : '+'}</span>
+              {isExpanded ? 'Ocultar opções de contexto' : 'Adicionar seu contexto para uma análise mais precisa da IA'}
+            </button>
+            
+            {isExpanded && (
+              <div className="mt-3 p-5 bg-slate-50 border border-slate-200 rounded-xl animate-in slide-in-from-top-2 fade-in duration-300">
+                <label className="block text-sm font-semibold text-slate-800 mb-2">
+                  Qual sua faixa de renda?
+                </label>
+                <select
+                  value={income}
+                  onChange={(e) => setIncome(e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                >
+                  <option value="Não informado">Prefiro não informar</option>
+                  <option value="Recebo 1 a 2 salários mínimos">1 a 2 salários mínimos</option>
+                  <option value="Recebo 3 a 4 salários mínimos">3 a 4 salários mínimos</option>
+                  <option value="Recebo 5 a 6 salários mínimos">5 a 6 salários mínimos</option>
+                  <option value="Recebo 7 a 10 salários mínimos">7 a 10 salários mínimos</option>
+                  <option value="Recebo 11 a 15 salários mínimos">11 a 15 salários mínimos</option>
+                  <option value="Recebo mais de 15 salários mínimos">Mais de 15 salários mínimos</option>
+                </select>
+                <p className="text-xs text-slate-500 mt-2 flex items-start">
+                  <span className="inline-block bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-[10px] font-bold mr-2 mt-0.5">DICA</span>
+                  Isso ajuda nossa IA a recomendar de forma mais realista se o carro se ajusta ao seu bolso a longo prazo.
+                </p>
+              </div>
+            )}
+          </div>
         </section>
 
         {/* Error State */}
@@ -66,7 +105,7 @@ function App() {
         {/* Results */}
         {!isLoading && data && (
           <div className="space-y-8 animate-in fade-in duration-700 slide-in-from-bottom-8">
-             <DashboardStatus verdict={data.verdict} surpriseCostEstimate={data.surpriseCostEstimate} />
+             <DashboardStatus verdict={data.verdict || 'Cuidado'} surpriseCostEstimate={data.surpriseCostEstimate} />
              
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                <div className="lg:col-span-2 space-y-8">
