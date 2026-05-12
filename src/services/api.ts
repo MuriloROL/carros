@@ -6,64 +6,93 @@ export interface AnalystItem {
 }
 
 export interface McqueenResponse {
-  analysisText: string;
+  mcqueenAnalysis?: string;
+  analysisText?: string;
+  veredito?: string;
   verdict?: 'Sim' | 'Não' | 'Cuidado'; // Opcional, caso o mcqueen mande depois
+  pistasPerigosas?: string[];
+  tcoData?: AnalystItem[];
 }
 
 export interface CarAnalysisData extends McqueenResponse {
+  analysisText: string;
   tcoData: AnalystItem[];
   // Campos estáticos/padrões para painel enquanto não vêm da API
   surpriseCostEstimate: number;
   chronicProblems: string[];
 }
 
-const MCQUEEN_WEBHOOK = 'http://localhost:5678/webhook/mcqueen';
-const ANALISTA_WEBHOOK = 'http://localhost:5678/webhook/analista';
+const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
+const MCQUEEN_WEBHOOK = `${API_BASE}/mcqueen-tco`;
+const ANALISTA_WEBHOOK = `${API_BASE}/analista`;
 
 export const fetchCarAnalysis = async (carModel: string, income: string): Promise<CarAnalysisData> => {
   try {
-    const payload = { carModel, context: { renda: income } };
+    let rendaNumber = 5000;
+    if (income.includes('1 a 2')) rendaNumber = 2824;
+    else if (income.includes('3 a 4')) rendaNumber = 5648;
+    else if (income.includes('5 a 6')) rendaNumber = 8472;
+    else if (income.includes('7 a 10')) rendaNumber = 14120;
+    else if (income.includes('11 a 15')) rendaNumber = 21180;
+    else if (income.includes('mais de 15')) rendaNumber = 30000;
+
+    const mcqueenPayload = { carro: carModel, renda: rendaNumber };
+    const analistaPayload = { carModel, context: { renda: income } };
+
     const [mcqueenRes, analistaRes] = await Promise.all([
       fetch(MCQUEEN_WEBHOOK, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(mcqueenPayload)
       }),
       fetch(ANALISTA_WEBHOOK, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(analistaPayload)
       })
     ]);
 
     if (!mcqueenRes.ok || !analistaRes.ok) {
-      throw new Error('Falha na comunicação com o n8n. Verifique se os webhooks estão ativos.');
+      throw new Error('Falha de conexão com o serviço de análise. Verifique se o agente local está rodando (uv run uvicorn app.main:app na pasta agent/).');
     }
 
     const mcqueenText = await mcqueenRes.text();
     const analistaText = await analistaRes.text();
 
     if (!mcqueenText || !analistaText) {
-      throw new Error(`O n8n devolveu uma resposta vazia. Isso significa que o fluxo quebrou antes de chegar no nó "Respond to Webhook". Vá no seu n8n, clique na aba "Executions" e verifique se o nó do Agente/Groq não está dando erro (como falha na API Key).`);
+      throw new Error('O agente devolveu uma resposta vazia. Veja os logs do uvicorn no terminal onde o agente está rodando.');
     }
 
-    const mcqueenData: Partial<McqueenResponse> = JSON.parse(mcqueenText);
-    const analistaData: AnalystItem[] = JSON.parse(analistaText);
-
-    const textLower = (mcqueenData.analysisText || '').toLowerCase();
+    const rawMcqueenData = JSON.parse(mcqueenText);
+    const mcqueenData: Partial<McqueenResponse> = Array.isArray(rawMcqueenData) ? rawMcqueenData[0] : rawMcqueenData;
     
-    let computedVerdict = mcqueenData.verdict;
-    if (!computedVerdict) {
+    let analistaData: AnalystItem[] = [];
+    try {
+      analistaData = JSON.parse(analistaText);
+    } catch {
+      analistaData = [];
+    }
+
+    const analysisText = mcqueenData.mcqueenAnalysis || mcqueenData.analysisText || '';
+    const textLower = analysisText.toLowerCase();
+    
+    const rawVerdict = mcqueenData.veredito || mcqueenData.verdict;
+    let computedVerdict: 'Sim' | 'Não' | 'Cuidado' = 'Cuidado';
+    
+    if (rawVerdict === 'Pode acelerar' || rawVerdict === 'Sim') computedVerdict = 'Sim';
+    else if (rawVerdict === 'Melhor ficar nos boxes' || rawVerdict === 'Não') computedVerdict = 'Não';
+    else if (rawVerdict === 'Cuidado') computedVerdict = 'Cuidado';
+    else {
       if (textLower.includes('não recomendo') || textLower.includes('fuja') || textLower.includes('bomba') || textLower.includes('cilada') || textLower.includes('melhor ficar nos boxes') || textLower.includes('alto risco')) {
         computedVerdict = 'Não';
       } else if (textLower.includes('pode acelerar') || textLower.includes('recomendo') || textLower.includes('boa compra') || textLower.includes('excelente') || textLower.includes('ótimo') || textLower.includes('vale a pena')) {
         computedVerdict = 'Sim';
-      } else {
-        computedVerdict = 'Cuidado';
       }
     }
 
-    let safeTcoData = Array.isArray(analistaData) ? analistaData : [];
+    const safeTcoData = Array.isArray(mcqueenData.tcoData) && mcqueenData.tcoData.length > 0
+      ? mcqueenData.tcoData
+      : (Array.isArray(analistaData) ? analistaData : []);
     let surpriseCost = 15000;
     
     if (safeTcoData.length > 0) {
@@ -88,15 +117,15 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
     }
 
     return {
-      analysisText: mcqueenData.analysisText || 'Análise de texto não recebida.',
+      analysisText: analysisText || 'Análise de texto não recebida.',
       verdict: computedVerdict,
       surpriseCostEstimate: surpriseCost,
-      chronicProblems: [],
+      chronicProblems: mcqueenData.pistasPerigosas || [],
       tcoData: safeTcoData
     };
 
   } catch (error) {
-    console.error('Erro ao chamar Webhooks reais:', error);
-    throw new Error('Falha de conexão com os Webhooks locais na porta 5678. Inicie seu n8n.');
+    console.error('Erro ao chamar o agente:', error);
+    throw new Error('Falha de conexão com o serviço de análise. Verifique se o agente local está rodando (uv run uvicorn app.main:app na pasta agent/).');
   }
 };
