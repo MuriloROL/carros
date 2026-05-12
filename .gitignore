@@ -33,3 +33,10 @@ coverage/
 
 # n8n files
 n8n.json
+
+# agent
+agent/.env
+agent/.venv/
+agent/__pycache__/
+agent/**/__pycache__/
+agent/.pytest_cache/
