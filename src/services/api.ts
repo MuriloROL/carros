@@ -15,14 +15,16 @@ export interface McqueenResponse {
 }
 
 export interface CarAnalysisData extends McqueenResponse {
+  analysisText: string;
   tcoData: AnalystItem[];
   // Campos estáticos/padrões para painel enquanto não vêm da API
   surpriseCostEstimate: number;
   chronicProblems: string[];
 }
 
-const MCQUEEN_WEBHOOK = 'https://devmurilolima.app.n8n.cloud/webhook/mcqueen-tco';
-const ANALISTA_WEBHOOK = 'https://devmurilolima.app.n8n.cloud/webhook/analista';
+const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
+const MCQUEEN_WEBHOOK = `${API_BASE}/mcqueen-tco`;
+const ANALISTA_WEBHOOK = `${API_BASE}/analista`;
 
 export const fetchCarAnalysis = async (carModel: string, income: string): Promise<CarAnalysisData> => {
   try {
@@ -51,26 +53,30 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
     ]);
 
     if (!mcqueenRes.ok || !analistaRes.ok) {
-      throw new Error('Falha na comunicação com o n8n. Verifique se os webhooks estão ativos.');
+      throw new Error('Falha de conexão com o serviço de análise. Verifique se o agente local está rodando (uv run uvicorn app.main:app na pasta agent/).');
     }
 
     const mcqueenText = await mcqueenRes.text();
     const analistaText = await analistaRes.text();
 
     if (!mcqueenText || !analistaText) {
-      throw new Error(`O n8n devolveu uma resposta vazia. Isso significa que o fluxo quebrou antes de chegar no nó "Respond to Webhook". Vá no seu n8n, clique na aba "Executions" e verifique se o nó do Agente/Groq não está dando erro (como falha na API Key).`);
+      throw new Error('O agente devolveu uma resposta vazia. Veja os logs do uvicorn no terminal onde o agente está rodando.');
     }
 
     const rawMcqueenData = JSON.parse(mcqueenText);
     const mcqueenData: Partial<McqueenResponse> = Array.isArray(rawMcqueenData) ? rawMcqueenData[0] : rawMcqueenData;
     
     let analistaData: AnalystItem[] = [];
-    try { analistaData = JSON.parse(analistaText); } catch(e) {}
+    try {
+      analistaData = JSON.parse(analistaText);
+    } catch {
+      analistaData = [];
+    }
 
     const analysisText = mcqueenData.mcqueenAnalysis || mcqueenData.analysisText || '';
     const textLower = analysisText.toLowerCase();
     
-    let rawVerdict = mcqueenData.veredito || mcqueenData.verdict;
+    const rawVerdict = mcqueenData.veredito || mcqueenData.verdict;
     let computedVerdict: 'Sim' | 'Não' | 'Cuidado' = 'Cuidado';
     
     if (rawVerdict === 'Pode acelerar' || rawVerdict === 'Sim') computedVerdict = 'Sim';
@@ -84,7 +90,7 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
       }
     }
 
-    let safeTcoData = Array.isArray(mcqueenData.tcoData) && mcqueenData.tcoData.length > 0
+    const safeTcoData = Array.isArray(mcqueenData.tcoData) && mcqueenData.tcoData.length > 0
       ? mcqueenData.tcoData
       : (Array.isArray(analistaData) ? analistaData : []);
     let surpriseCost = 15000;
@@ -119,7 +125,7 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
     };
 
   } catch (error) {
-    console.error('Erro ao chamar Webhooks reais:', error);
-    throw new Error('Falha de conexão com os Webhooks da nuvem. Verifique o status da sua instância n8n.');
+    console.error('Erro ao chamar o agente:', error);
+    throw new Error('Falha de conexão com o serviço de análise. Verifique se o agente local está rodando (uv run uvicorn app.main:app na pasta agent/).');
   }
 };
