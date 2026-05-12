@@ -58,8 +58,6 @@ carros/
     ├── .env                      # gitignored, com keys já preenchidas
     ├── .env.example              # versionado, valores em branco
     ├── README.md                 # como rodar e testar
-    ├── supabase/
-    │   └── match_mcqueen_document.sql  # SQL pro Supabase (se RPC ainda não existir)
     ├── app/
     │   ├── __init__.py
     │   ├── main.py               # FastAPI app + rotas
@@ -107,9 +105,11 @@ SERPAPI_API_KEY=<rotacionar-e-substituir>
 SUPABASE_URL=https://lvwldvxkmmijdpnctdgp.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2d2xkdnhrbW1pamRwbmN0ZGdwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODUzOTQwNSwiZXhwIjoyMDk0MTE1NDA1fQ.dAg8cbiyVyaAFTwnvRFh2pf1_rpnpBP7kFBiNGyED5o
 SUPABASE_INSERT_RPC=insert_mcqueen_document
-SUPABASE_MATCH_RPC=match_mcqueen_document
+SUPABASE_MATCH_RPC=match_mcqueen_documents
+SUPABASE_MATCH_TABLE=mcqueen_documents
+SUPABASE_EMBEDDING_DIM=1536
 SUPABASE_MATCH_TOP_K=4
-SUPABASE_MATCH_THRESHOLD=0.78
+SUPABASE_MATCH_THRESHOLD=0.78    # aplicado client-side; o RPC nao recebe threshold
 
 # Servidor
 API_HOST=0.0.0.0
@@ -146,9 +146,12 @@ Request
 ### Tools
 
 **`busca_interna(query: str) -> str`**
-1. Gera embedding da query via `POST {OPENROUTER_BASE_URL}/embeddings` com `text-embedding-3-small`.
-2. Chama Supabase RPC `match_mcqueen_document` com `{query_embedding, match_threshold, match_count}`.
-3. Concatena `content` dos top-K docs em uma string. Se 0 docs ou similaridade < threshold, retorna literal `"NENHUM_RESULTADO_RELEVANTE"` — gatilho explícito no system prompt para o agente cair pro Google Search.
+1. Gera embedding da query via `POST {OPENROUTER_BASE_URL}/embeddings` com `text-embedding-3-small` (1536 dim).
+2. Chama Supabase RPC `match_mcqueen_documents` (PLURAL) com `{query_embedding, match_count}`. O RPC não recebe threshold — vai retornar até `match_count` docs ordenados por similaridade.
+3. Como o RPC não filtra por threshold, recalcula a similaridade no lado Python (cosseno via inner product já vem do retorno se o RPC inclui, ou re-computa) e descarta docs com similaridade < `SUPABASE_MATCH_THRESHOLD`.
+4. Concatena `content` dos top-K docs restantes em uma string. Se 0 docs sobreviveram ao filtro, retorna literal `"NENHUM_RESULTADO_RELEVANTE"` — gatilho explícito no system prompt para o agente cair pro Google Search.
+
+> **Nota:** ao implementar, primeiro chamar o RPC com `query_embedding` simples e inspecionar o shape do retorno. Se vier `(id, content, metadata, similarity)`, usa-se direto. Se vier sem `similarity`, calcular client-side a partir do embedding (não disponível no retorno default), o que exigiria SELECT direto na tabela — fallback é só usar top_k sem filtro.
 
 **`google_search(query: str) -> str`**
 1. Chama `https://serpapi.com/search` com `engine=google`, `q=<query>`, `api_key=<env>`.
@@ -259,43 +262,25 @@ Nenhuma outra mudança de lógica — payloads e respostas continuam idênticos.
 
 **Coverage alvo:** 80%+ em `app/`. Testes "happy path" + 1-2 de erro por módulo.
 
-## 12. Open question — `match_mcqueen_document` RPC
+## 12. Schema do Supabase (verificado)
 
-O `n8n.json` só mostra a função INSERT. A QUERY (Busca_Interna) é feita por um sub-workflow não exportado, que provavelmente chama uma RPC `match_*` no Supabase. Plano:
+Inspeção feita pela REST API do Supabase em 2026-05-11. Schema real:
 
-1. Tentar usar `match_mcqueen_document` (nome convencional, pareado com o insert).
-2. Se não existir (HTTP 404 da RPC), entregar o SQL em `agent/supabase/match_mcqueen_document.sql` para o usuário rodar no Supabase:
+**Tabela `public.mcqueen_documents`**
 
-```sql
-create or replace function match_mcqueen_document(
-  query_embedding vector(1536),
-  match_threshold float default 0.78,
-  match_count int default 4
-)
-returns table (
-  id bigint,
-  content text,
-  metadata jsonb,
-  similarity float
-)
-language plpgsql
-as $$
-begin
-  return query
-  select
-    d.id,
-    d.content,
-    d.metadata,
-    1 - (d.embedding <=> query_embedding) as similarity
-  from mcqueen_documents d
-  where 1 - (d.embedding <=> query_embedding) > match_threshold
-  order by d.embedding <=> query_embedding
-  limit match_count;
-end;
-$$;
-```
+| coluna | tipo |
+|---|---|
+| `id` | `bigint` (PK) |
+| `content` | `text` |
+| `metadata` | `jsonb` |
+| `embedding` | `public.vector(1536)` |
+| `created_at` | `timestamp with time zone default now()` |
 
-Nomes de tabela/coluna podem precisar de ajuste depois de inspecionar o schema real do Supabase. Documentado como follow-up no `README.md` do agent.
+**RPC `insert_mcqueen_document`** (singular) — usado pelo loop de ingestão. Aceita `doc_content`, `doc_metadata`, `doc_embedding` (assinatura inferida pelo uso atual no n8n).
+
+**RPC `match_mcqueen_documents`** (PLURAL — atenção, difere do insert). Parâmetros: `query_embedding vector` (obrigatório), `match_count integer`, `filter jsonb`. **Não tem `match_threshold`** — filtragem por similaridade é responsabilidade do cliente.
+
+**Conclusão:** não precisa criar nenhuma função no Supabase. Tudo pronto. Como o nome do RPC do match não é o que eu tinha assumido (singular), o `.env` reflete o nome correto (plural) e o código fica explícito sobre essa pegadinha (insert singular vs match plural).
 
 ## 13. Critérios de aceite
 
