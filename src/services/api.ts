@@ -6,8 +6,12 @@ export interface AnalystItem {
 }
 
 export interface McqueenResponse {
-  analysisText: string;
+  mcqueenAnalysis?: string;
+  analysisText?: string;
+  veredito?: string;
   verdict?: 'Sim' | 'Não' | 'Cuidado'; // Opcional, caso o mcqueen mande depois
+  pistasPerigosas?: string[];
+  tcoData?: AnalystItem[];
 }
 
 export interface CarAnalysisData extends McqueenResponse {
@@ -17,22 +21,32 @@ export interface CarAnalysisData extends McqueenResponse {
   chronicProblems: string[];
 }
 
-const MCQUEEN_WEBHOOK = 'http://localhost:5678/webhook/mcqueen';
-const ANALISTA_WEBHOOK = 'http://localhost:5678/webhook/analista';
+const MCQUEEN_WEBHOOK = 'https://devmurilolima.app.n8n.cloud/webhook/mcqueen-tco';
+const ANALISTA_WEBHOOK = 'https://devmurilolima.app.n8n.cloud/webhook/analista';
 
 export const fetchCarAnalysis = async (carModel: string, income: string): Promise<CarAnalysisData> => {
   try {
-    const payload = { carModel, context: { renda: income } };
+    let rendaNumber = 5000;
+    if (income.includes('1 a 2')) rendaNumber = 2824;
+    else if (income.includes('3 a 4')) rendaNumber = 5648;
+    else if (income.includes('5 a 6')) rendaNumber = 8472;
+    else if (income.includes('7 a 10')) rendaNumber = 14120;
+    else if (income.includes('11 a 15')) rendaNumber = 21180;
+    else if (income.includes('mais de 15')) rendaNumber = 30000;
+
+    const mcqueenPayload = { carro: carModel, renda: rendaNumber };
+    const analistaPayload = { carModel, context: { renda: income } };
+
     const [mcqueenRes, analistaRes] = await Promise.all([
       fetch(MCQUEEN_WEBHOOK, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(mcqueenPayload)
       }),
       fetch(ANALISTA_WEBHOOK, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(analistaPayload)
       })
     ]);
 
@@ -47,23 +61,32 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
       throw new Error(`O n8n devolveu uma resposta vazia. Isso significa que o fluxo quebrou antes de chegar no nó "Respond to Webhook". Vá no seu n8n, clique na aba "Executions" e verifique se o nó do Agente/Groq não está dando erro (como falha na API Key).`);
     }
 
-    const mcqueenData: Partial<McqueenResponse> = JSON.parse(mcqueenText);
-    const analistaData: AnalystItem[] = JSON.parse(analistaText);
-
-    const textLower = (mcqueenData.analysisText || '').toLowerCase();
+    const rawMcqueenData = JSON.parse(mcqueenText);
+    const mcqueenData: Partial<McqueenResponse> = Array.isArray(rawMcqueenData) ? rawMcqueenData[0] : rawMcqueenData;
     
-    let computedVerdict = mcqueenData.verdict;
-    if (!computedVerdict) {
+    let analistaData: AnalystItem[] = [];
+    try { analistaData = JSON.parse(analistaText); } catch(e) {}
+
+    const analysisText = mcqueenData.mcqueenAnalysis || mcqueenData.analysisText || '';
+    const textLower = analysisText.toLowerCase();
+    
+    let rawVerdict = mcqueenData.veredito || mcqueenData.verdict;
+    let computedVerdict: 'Sim' | 'Não' | 'Cuidado' = 'Cuidado';
+    
+    if (rawVerdict === 'Pode acelerar' || rawVerdict === 'Sim') computedVerdict = 'Sim';
+    else if (rawVerdict === 'Melhor ficar nos boxes' || rawVerdict === 'Não') computedVerdict = 'Não';
+    else if (rawVerdict === 'Cuidado') computedVerdict = 'Cuidado';
+    else {
       if (textLower.includes('não recomendo') || textLower.includes('fuja') || textLower.includes('bomba') || textLower.includes('cilada') || textLower.includes('melhor ficar nos boxes') || textLower.includes('alto risco')) {
         computedVerdict = 'Não';
       } else if (textLower.includes('pode acelerar') || textLower.includes('recomendo') || textLower.includes('boa compra') || textLower.includes('excelente') || textLower.includes('ótimo') || textLower.includes('vale a pena')) {
         computedVerdict = 'Sim';
-      } else {
-        computedVerdict = 'Cuidado';
       }
     }
 
-    let safeTcoData = Array.isArray(analistaData) ? analistaData : [];
+    let safeTcoData = Array.isArray(mcqueenData.tcoData) && mcqueenData.tcoData.length > 0
+      ? mcqueenData.tcoData
+      : (Array.isArray(analistaData) ? analistaData : []);
     let surpriseCost = 15000;
     
     if (safeTcoData.length > 0) {
@@ -88,15 +111,15 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
     }
 
     return {
-      analysisText: mcqueenData.analysisText || 'Análise de texto não recebida.',
+      analysisText: analysisText || 'Análise de texto não recebida.',
       verdict: computedVerdict,
       surpriseCostEstimate: surpriseCost,
-      chronicProblems: [],
+      chronicProblems: mcqueenData.pistasPerigosas || [],
       tcoData: safeTcoData
     };
 
   } catch (error) {
     console.error('Erro ao chamar Webhooks reais:', error);
-    throw new Error('Falha de conexão com os Webhooks locais na porta 5678. Inicie seu n8n.');
+    throw new Error('Falha de conexão com os Webhooks da nuvem. Verifique o status da sua instância n8n.');
   }
 };
