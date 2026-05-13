@@ -35,7 +35,11 @@ class Settings(BaseSettings):
     # Servidor
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    # CORS: use cors_origin_regex em DEV (cobre qualquer porta de localhost) e
+    # cors_origins em PROD (lista exata). Os dois sao independentes; se ambos
+    # vierem setados, ambos sao passados ao CORSMiddleware (regex OU lista).
     cors_origins: str = "http://localhost:5173,http://localhost:4173"
+    cors_origin_regex: str = ""
     log_level: str = "info"
 
     # Agente

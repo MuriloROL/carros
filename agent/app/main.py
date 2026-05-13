@@ -18,13 +18,16 @@ logger = logging.getLogger("agent")
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="Carros Agent", version="0.1.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    cors_kwargs: dict = {
+        "allow_origins": settings.cors_origins_list,
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if settings.cors_origin_regex:
+        # Em DEV cobre qualquer porta de localhost/127.0.0.1 sem precisar listar.
+        cors_kwargs["allow_origin_regex"] = settings.cors_origin_regex
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
     return app
 
 
