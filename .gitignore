@@ -34,8 +34,12 @@ coverage/
 # n8n files
 n8n.json
 
+# env files (em qualquer pasta — proteje contra commit acidental)
+.env
+.env.local
+.env.*.local
+
 # agent
-agent/.env
 agent/.venv/
 agent/__pycache__/
 agent/**/__pycache__/
