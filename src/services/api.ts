@@ -7,15 +7,16 @@ export interface AnalystItem {
 
 export interface McqueenResponse {
   mcqueenAnalysis?: string;
-  analysisText?: string;
-  veredito?: string;
-  verdict?: 'Sim' | 'Não' | 'Cuidado'; // Opcional, caso o mcqueen mande depois
+  veredito?: 'Pode acelerar' | 'Melhor ficar nos boxes' | string;
   pistasPerigosas?: string[];
   tcoData?: AnalystItem[];
 }
 
 export interface CarAnalysisData extends McqueenResponse {
   analysisText: string;
+  // Veredito normalizado para o shape consumido pelos componentes (derivado do
+  // `veredito` do backend mais a heuristica de texto de fallback).
+  verdict: 'Sim' | 'Não' | 'Cuidado';
   tcoData: AnalystItem[];
   // Campos estáticos/padrões para painel enquanto não vêm da API
   surpriseCostEstimate: number;
@@ -63,9 +64,8 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
       throw new Error('O agente devolveu uma resposta vazia. Veja os logs do uvicorn no terminal onde o agente está rodando.');
     }
 
-    const rawMcqueenData = JSON.parse(mcqueenText);
-    const mcqueenData: Partial<McqueenResponse> = Array.isArray(rawMcqueenData) ? rawMcqueenData[0] : rawMcqueenData;
-    
+    const mcqueenData: Partial<McqueenResponse> = JSON.parse(mcqueenText);
+
     let analistaData: AnalystItem[] = [];
     try {
       analistaData = JSON.parse(analistaText);
@@ -73,21 +73,21 @@ export const fetchCarAnalysis = async (carModel: string, income: string): Promis
       analistaData = [];
     }
 
-    const analysisText = mcqueenData.mcqueenAnalysis || mcqueenData.analysisText || '';
+    const analysisText = mcqueenData.mcqueenAnalysis || '';
     const textLower = analysisText.toLowerCase();
-    
-    const rawVerdict = mcqueenData.veredito || mcqueenData.verdict;
+
+    // Veredito vem do backend Python como "Pode acelerar" ou "Melhor ficar nos boxes".
+    // Heuristica de texto e fallback: cobre o caso raro de o LLM emitir o veredito
+    // dentro do mcqueenAnalysis em vez do campo dedicado.
+    const rawVerdict = mcqueenData.veredito;
     let computedVerdict: 'Sim' | 'Não' | 'Cuidado' = 'Cuidado';
-    
-    if (rawVerdict === 'Pode acelerar' || rawVerdict === 'Sim') computedVerdict = 'Sim';
-    else if (rawVerdict === 'Melhor ficar nos boxes' || rawVerdict === 'Não') computedVerdict = 'Não';
-    else if (rawVerdict === 'Cuidado') computedVerdict = 'Cuidado';
-    else {
-      if (textLower.includes('não recomendo') || textLower.includes('fuja') || textLower.includes('bomba') || textLower.includes('cilada') || textLower.includes('melhor ficar nos boxes') || textLower.includes('alto risco')) {
-        computedVerdict = 'Não';
-      } else if (textLower.includes('pode acelerar') || textLower.includes('recomendo') || textLower.includes('boa compra') || textLower.includes('excelente') || textLower.includes('ótimo') || textLower.includes('vale a pena')) {
-        computedVerdict = 'Sim';
-      }
+
+    if (rawVerdict === 'Pode acelerar') computedVerdict = 'Sim';
+    else if (rawVerdict === 'Melhor ficar nos boxes') computedVerdict = 'Não';
+    else if (textLower.includes('melhor ficar nos boxes') || textLower.includes('não recomendo') || textLower.includes('fuja') || textLower.includes('cilada') || textLower.includes('alto risco')) {
+      computedVerdict = 'Não';
+    } else if (textLower.includes('pode acelerar') || textLower.includes('recomendo') || textLower.includes('boa compra') || textLower.includes('vale a pena')) {
+      computedVerdict = 'Sim';
     }
 
     const safeTcoData = Array.isArray(mcqueenData.tcoData) && mcqueenData.tcoData.length > 0
