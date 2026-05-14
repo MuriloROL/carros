@@ -146,7 +146,35 @@ async def run_mcqueen(carro: str, renda: float, settings: Settings) -> tuple[dic
 
     messages = result.get("messages", [])
     raw_text = _extract_final_text(messages)
+    from_web = _detect_google_search_used(messages)
+
+    # Llama (e outros modelos abertos) as vezes emitem AIMessage final vazia depois de
+    # tool calls. Quando isso acontece, faz uma synthesis call sem tools forcando JSON
+    # mode, passando os outputs das tools como contexto.
+    if not raw_text.strip():
+        logger.info("mcqueen: AIMessage final vazia, executando synthesis call")
+        synth_model = build_chat_model(settings, json_mode=True)
+        tool_outputs = "\n\n".join(
+            f"Resultado de {getattr(m, 'name', '?') or '?'}:\n{m.content}"
+            for m in messages if isinstance(m, ToolMessage)
+        ) or "(nenhuma ferramenta retornou conteudo util)"
+        synth_messages = [
+            SystemMessage(content=MCQUEEN_SYSTEM),
+            HumanMessage(content=_user_prompt(carro, renda)),
+            HumanMessage(content=(
+                "Voce ja consultou as ferramentas. Resultados coletados:\n\n"
+                f"{tool_outputs}\n\n"
+                "Agora produza APENAS o JSON final estrito definido no system prompt. "
+                "Sem markdown, sem texto antes ou depois."
+            )),
+        ]
+        try:
+            synth = await synth_model.ainvoke(synth_messages)
+            raw_text = synth.content if isinstance(synth.content, str) else str(synth.content)
+        except Exception as exc:
+            logger.warning("mcqueen: synthesis call falhou: %s", exc)
+
     parsed = parse_mcqueen_output(raw_text)
-    from_web = _detect_google_search_used(messages) or parsed["_meta"].get("from_web", False)
+    from_web = from_web or parsed["_meta"].get("from_web", False)
     parsed["_meta"]["from_web"] = from_web
     return parsed, from_web
