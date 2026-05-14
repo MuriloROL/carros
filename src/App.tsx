@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import Snowfall from 'react-snowfall';
 import { Header } from './components/Header';
 import { DashboardStatus, DashboardSkeleton } from './components/DashboardStatus';
 import { AnalysisNarrative, AnalysisSkeleton } from './components/AnalysisNarrative';
 import { TCOTable, TCOTableSkeleton } from './components/TCOTable';
 import { ChronicProblemsAlert } from './components/ChronicProblemsAlert';
 import { useCarAnalysis } from './hooks/useCarAnalysis';
+import { useReducedMotion } from './hooks/useReducedMotion';
 import { Search } from 'lucide-react';
 
 function App() {
@@ -12,6 +14,7 @@ function App() {
   const [carModel, setCarModel] = useState('');
   const [income, setIncome] = useState('Não informado');
   const [isExpanded, setIsExpanded] = useState(false);
+  const reducedMotion = useReducedMotion();
 
   const handleAnalyze = (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,9 +24,19 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[var(--color-primary-light)] flex flex-col">
+      {!reducedMotion && (
+        <Snowfall
+          snowflakeCount={60}
+          speed={[0.4, 1.2]}
+          wind={[-0.4, 0.8]}
+          radius={[0.5, 2]}
+          color="rgba(255,255,255,0.75)"
+          style={{ position: 'fixed', inset: 0, zIndex: 1, pointerEvents: 'none' }}
+        />
+      )}
       <Header />
 
-      <main className="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl py-8">
+      <main className="flex-grow container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl py-8 relative z-10">
         {/* Search Bar */}
         <section className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 mb-8 glass-panel relative z-10">
           <div className="max-w-2xl mx-auto text-center mb-6">
