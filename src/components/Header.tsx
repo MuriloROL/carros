@@ -1,5 +1,5 @@
 import React from 'react';
-import { CarFront } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 export const Header: React.FC = () => {
   return (
@@ -7,13 +7,19 @@ export const Header: React.FC = () => {
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="bg-[var(--color-primary-light)] p-2 rounded-lg">
-            <CarFront className="w-8 h-8 text-blue-300" />
+            <Zap className="w-8 h-8 text-[var(--color-brand)]" />
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight">Custo Real Auto</h1>
-            <p className="text-xs text-blue-300 font-medium">Plataforma Inteligente de Decisão</p>
+            <p className="text-xs text-red-300 font-medium">Plataforma Inteligente de Decisão</p>
           </div>
         </div>
+        <span
+          aria-hidden="true"
+          className="text-xs font-bold tracking-wider text-red-300/40 hidden sm:block"
+        >
+          #95
+        </span>
       </div>
     </header>
   );
