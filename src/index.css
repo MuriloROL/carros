@@ -9,6 +9,11 @@
   --color-danger-light: #FEE2E2; /* Red 100 */
   --color-warning: #F59E0B; /* Amber 500 */
   --color-warning-light: #FEF3C7; /* Amber 100 */
+
+  --color-brand: #D62828;      /* Race Red — primário de ação */
+  --color-brand-dark: #B91C1C; /* hover/active */
+  --color-brand-soft: #FEE2E2; /* fundo de chips/badges de marca */
+  --color-brand-ink: #7F1D1D;  /* texto sobre brand-soft */
 }
 
 @layer base {
