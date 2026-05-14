@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #0F172A; /* Slate 900 - Navy Blue */
-  --color-primary-light: #1E293B; /* Slate 800 */
+  --color-primary: #1C1917; /* Stone 900 — cinza quente, pareia com brand red */
+  --color-primary-light: #292524; /* Stone 800 */
   --color-success: #10B981; /* Emerald 500 */
   --color-success-light: #D1FAE5; /* Emerald 100 */
   --color-danger: #EF4444; /* Red 500 */
@@ -18,8 +18,8 @@
 
 @layer base {
   body {
-    background-color: #F8FAFC; /* Slate 50 */
-    color: #0F172A;
+    background-color: #FAFAF9; /* Stone 50 — base clara levemente quente */
+    color: #1C1917; /* Stone 900, mesmo valor de --color-primary */
     font-family: 'Inter', system-ui, sans-serif;
   }
 }
