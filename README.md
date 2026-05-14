@@ -25,7 +25,7 @@ App full-stack que analisa a viabilidade de comprar um carro usado para um clien
 ```
                                                     ┌──────────────────────────────┐
                                                     │  OpenRouter                  │
-                                                    │  - gpt-4o-mini (LLM)         │
+                                                    │  - Llama 3.3 70B (LLM)       │
                                                     │  - text-embedding-3-small    │
                                                     └──────────────▲───────────────┘
                                                                    │
@@ -52,7 +52,7 @@ App full-stack que analisa a viabilidade de comprar um carro usado para um clien
 
 **Fluxo do McQueen:** o agente sempre tenta `Busca_Interna` primeiro. Se vier `NENHUM_RESULTADO_RELEVANTE`, cai pro `Google_Search`. Quando o Google é usado, o resultado vira embedding e é gravado no Supabase como `BackgroundTask` — ou seja, o RAG fica mais rico a cada análise feita.
 
-## 🚀 Como iniciar o projeto
+## 🚀 Quick start
 
 ### Pré-requisitos
 
@@ -61,40 +61,30 @@ App full-stack que analisa a viabilidade de comprar um carro usado para um clien
 - **[uv](https://docs.astral.sh/uv/)** (gerenciador Python). Instala com `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - Contas/chaves: [OpenRouter](https://openrouter.ai/), [SerpAPI](https://serpapi.com/), [Supabase](https://supabase.com/) (com extensão `pgvector` habilitada e a tabela/RPCs descritos em `agent/README.md`).
 
-### Setup inicial (apenas na primeira vez)
+### 1. Subir o agente Python
 
-**Backend (Agente Python):**
 ```bash
 cd agent
 cp .env.example .env
 # edite .env com suas chaves de OpenRouter, SerpAPI e Supabase
+
 uv sync                                        # cria .venv e instala deps
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
-**Frontend:**
+API em `http://localhost:8000`. Swagger UI em `/docs`. Health em `/health`.
+
+### 2. Subir o frontend
+
+Em outro terminal, na raiz do projeto:
+
 ```bash
-# na raiz do projeto
 cp .env.example .env                # default ja aponta pra localhost:8000
 npm install
-```
-
-### Subindo o projeto (dia a dia)
-
-Para rodar o projeto, você precisará de dois terminais.
-
-1. **Subindo o Backend:**
-Em um terminal, inicie o servidor do agente:
-```bash
-cd agent && uv run uvicorn app.main:app --port 8000
-```
-*(A API ficará disponível em `http://localhost:8000`. Swagger UI em `/docs`.)*
-
-2. **Subindo o Frontend:**
-Em outro terminal, na raiz do projeto:
-```bash
 npm run dev
 ```
-*(Abre em `http://localhost:5173`.)*
+
+Abre em `http://localhost:5173`.
 
 ### 3. Testar
 
@@ -142,7 +132,7 @@ carros/
 - Python 3.11+, gerenciado com `uv`
 - FastAPI + Uvicorn
 - LangChain 0.3 (`create_agent`) + `langchain-openai`
-- OpenRouter (LLM `openai/gpt-4o-mini` + embeddings `openai/text-embedding-3-small`)
+- OpenRouter (LLM `meta-llama/llama-3.3-70b-instruct` + embeddings `openai/text-embedding-3-small`)
 - Supabase com `pgvector` para RAG
 - SerpAPI para Google Search
 - `httpx` (async) para chamadas HTTP
@@ -159,7 +149,18 @@ carros/
    - Resposta final em **JSON estrito** (`mcqueenAnalysis`, `pistasPerigosas`, `veredito`, `tcoData`).
 4. O response passa por uma **cascata de parsing defensivo** (4 estratégias de conserto + fallback temático) — herdada 1:1 do antigo workflow n8n. Frontend nunca recebe erro de parsing.
 5. Se o agente usou Google, uma `BackgroundTask` gera embedding do resultado e insere no Supabase pra próxima consulta.
-6. Frontend também chama `POST /analista` em paralelo — esse é um LLM puro que devolve a tabela de TCO destrinchada por categoria.
+6. Frontend também chama `POST /analista` em paralelo.
+
+## 📊 O papel do Agente Analista
+
+Enquanto o McQueen foca na narrativa, no veredito e em encontrar defeitos crônicos (usando pesquisa na web e base interna), o **Agente Analista** (chamado via `POST /analista` em paralelo pelo frontend) é um LLM puro (sem *tools*).
+
+Seu papel exclusivo é atuar como um **especialista financeiro**. Ele analisa o veículo e a renda informada para calcular a quebra detalhada do **Custo Total de Propriedade (TCO)** anual:
+- IPVA e Seguro estimados.
+- Custos de manutenção preventiva e combustível.
+- O impacto percentual real que esse carro terá na renda mensal do usuário.
+
+Essa arquitetura multi-agente garante que a tabela de custos seja gerada com um *prompt* otimizado apenas para estimativas numéricas e matemática, deixando o McQueen focado inteiramente na investigação de problemas e na personalidade da resposta.
 
 ## 🧪 Desenvolvimento
 
@@ -197,7 +198,7 @@ Todos os testes do agente mockam OpenRouter/Supabase/SerpAPI via `respx`. **Zero
 | `SERPAPI_API_KEY` | Chave do SerpAPI (Google Search) |
 | `SUPABASE_URL` | URL do projeto Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key (acesso server-side ao pgvector) |
-| `LLM_MODEL` | `openai/gpt-4o-mini` (default) |
+| `LLM_MODEL` | `meta-llama/llama-3.3-70b-instruct` (default) |
 | `MCQUEEN_MAX_ITERATIONS` | `10` (default) |
 | `SUPABASE_MATCH_THRESHOLD` | `0.78` (filtro client-side de similaridade) |
 | `CORS_ORIGINS` | URLs do frontend liberadas |
