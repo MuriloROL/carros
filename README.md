@@ -52,7 +52,7 @@ App full-stack que analisa a viabilidade de comprar um carro usado para um clien
 
 **Fluxo do McQueen:** o agente sempre tenta `Busca_Interna` primeiro. Se vier `NENHUM_RESULTADO_RELEVANTE`, cai pro `Google_Search`. Quando o Google é usado, o resultado vira embedding e é gravado no Supabase como `BackgroundTask` — ou seja, o RAG fica mais rico a cada análise feita.
 
-## 🚀 Quick start
+## 🚀 Como iniciar o projeto
 
 ### Pré-requisitos
 
@@ -61,30 +61,40 @@ App full-stack que analisa a viabilidade de comprar um carro usado para um clien
 - **[uv](https://docs.astral.sh/uv/)** (gerenciador Python). Instala com `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - Contas/chaves: [OpenRouter](https://openrouter.ai/), [SerpAPI](https://serpapi.com/), [Supabase](https://supabase.com/) (com extensão `pgvector` habilitada e a tabela/RPCs descritos em `agent/README.md`).
 
-### 1. Subir o agente Python
+### Setup inicial (apenas na primeira vez)
 
+**Backend (Agente Python):**
 ```bash
 cd agent
 cp .env.example .env
 # edite .env com suas chaves de OpenRouter, SerpAPI e Supabase
-
 uv sync                                        # cria .venv e instala deps
-uv run uvicorn app.main:app --reload --port 8000
 ```
 
-API em `http://localhost:8000`. Swagger UI em `/docs`. Health em `/health`.
-
-### 2. Subir o frontend
-
-Em outro terminal, na raiz do projeto:
-
+**Frontend:**
 ```bash
+# na raiz do projeto
 cp .env.example .env                # default ja aponta pra localhost:8000
 npm install
-npm run dev
 ```
 
-Abre em `http://localhost:5173`.
+### Subindo o projeto (dia a dia)
+
+Para rodar o projeto, você precisará de dois terminais.
+
+1. **Subindo o Backend:**
+Em um terminal, inicie o servidor do agente:
+```bash
+cd agent && uv run uvicorn app.main:app --port 8000
+```
+*(A API ficará disponível em `http://localhost:8000`. Swagger UI em `/docs`.)*
+
+2. **Subindo o Frontend:**
+Em outro terminal, na raiz do projeto:
+```bash
+npm run dev
+```
+*(Abre em `http://localhost:5173`.)*
 
 ### 3. Testar
 
