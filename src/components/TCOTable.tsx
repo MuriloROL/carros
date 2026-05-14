@@ -11,8 +11,8 @@ export const TCOTable: React.FC<TCOTableProps> = ({ tcoData }) => {
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden mb-8 glass-panel">
       <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <div className="bg-blue-100 p-2 rounded-lg">
-            <Calculator className="w-5 h-5 text-blue-600" />
+          <div className="bg-[var(--color-brand-soft)] p-2 rounded-lg">
+            <Calculator className="w-5 h-5 text-[var(--color-brand)]" />
           </div>
           <div>
             <h3 className="text-lg font-semibold text-slate-800">Raio-X Financeiro (TCO)</h3>
