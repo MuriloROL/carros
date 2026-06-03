@@ -71,6 +71,37 @@ def test_analista_cache_hit_nao_chama_llm(client, monkeypatch):
     assert r.json()[0]["item"] == "IPVA"
 
 
+def test_mcqueen_miss_agenda_ingest(client, monkeypatch):
+    """No cache miss, run_mcqueen devolve ingest != None e a rota agenda o upsert."""
+    async def fake_run(carro, renda, settings):
+        response = {
+            "mcqueenAnalysis": "Kachow!",
+            "pistasPerigosas": ["a"],
+            "veredito": "Pode acelerar",
+            "tcoData": [],
+            "_meta": {"error": None, "from_web": True},
+        }
+        ingest = {"car_key": "civic-2018", "carro": "Civic 2018",
+                  "content": "perfil", "facts": {"pistasPerigosas": ["a"], "tcoData": []}}
+        return response, ingest
+
+    agendados = {"n": 0, "kwargs": None}
+
+    async def fake_upsert(*, car_key, carro, content, facts, settings):
+        agendados["n"] += 1
+        agendados["kwargs"] = {"car_key": car_key, "carro": carro}
+
+    monkeypatch.setattr("app.main.run_mcqueen", fake_run)
+    monkeypatch.setattr("app.main.upsert_knowledge", fake_upsert)
+
+    r = client.post("/mcqueen-tco", json={"carro": "Civic 2018", "renda": 8000})
+    assert r.status_code == 200
+    # FastAPI executa BackgroundTasks após enviar a resposta; com TestClient isso
+    # ocorre dentro do bloco do request. Confirmamos que o upsert foi agendado e rodou.
+    assert agendados["n"] == 1
+    assert agendados["kwargs"] == {"car_key": "civic-2018", "carro": "Civic 2018"}
+
+
 def test_analista_cache_miss_chama_llm(client, monkeypatch):
     async def fake_get(car_key, settings):
         return None
