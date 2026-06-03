@@ -8,7 +8,8 @@ from app.config import Settings, get_settings
 from app.schemas import McqueenRequest, AnalistaRequest
 from app.agents.mcqueen import run_mcqueen
 from app.agents.analista import run_analista
-from app.ingestion import ingest_mcqueen_response
+from app.cache_key import canonical_key, extract_year
+from app.knowledge import get_knowledge, find_semantic, upsert_knowledge
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -45,21 +46,18 @@ async def mcqueen_tco(
     background: BackgroundTasks,
     settings: Settings = Depends(get_settings),
 ):
-    parsed, from_web = await run_mcqueen(
+    response, ingest = await run_mcqueen(
         carro=payload.carro, renda=payload.renda, settings=settings
     )
-    if from_web:
-        background.add_task(
-            ingest_mcqueen_response, parsed, payload.carro, settings
-        )
+    if ingest is not None:
+        background.add_task(upsert_knowledge, settings=settings, **ingest)
 
-    # Resposta no shape que o frontend espera (camelCase, top-level keys)
     return JSONResponse({
-        "mcqueenAnalysis": parsed.get("mcqueenAnalysis", ""),
-        "pistasPerigosas": parsed.get("pistasPerigosas", []),
-        "veredito": parsed.get("veredito", "Indefinido"),
-        "tcoData": parsed.get("tcoData", []),
-        "_meta": parsed.get("_meta", {}),
+        "mcqueenAnalysis": response.get("mcqueenAnalysis", ""),
+        "pistasPerigosas": response.get("pistasPerigosas", []),
+        "veredito": response.get("veredito", "Indefinido"),
+        "tcoData": response.get("tcoData", []),
+        "_meta": response.get("_meta", {}),
     })
 
 
@@ -68,6 +66,15 @@ async def analista(
     payload: AnalistaRequest,
     settings: Settings = Depends(get_settings),
 ):
+    key = canonical_key(payload.car_model)
+    year = extract_year(payload.car_model)
+    doc = await get_knowledge(key, settings)
+    if doc is None:
+        doc = await find_semantic(payload.car_model, year, settings)
+
+    if doc and (doc.get("facts") or {}).get("tcoData"):
+        return JSONResponse(doc["facts"]["tcoData"])
+
     items = await run_analista(
         car_model=payload.car_model,
         renda=payload.context.renda,

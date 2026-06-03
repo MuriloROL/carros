@@ -31,16 +31,16 @@ def test_analista_rejects_missing_carmodel(client):
 
 
 def test_mcqueen_happy_path(client, monkeypatch):
-    """A rota delega ao run_mcqueen — mockamos."""
+    """A rota delega ao run_mcqueen (que agora retorna (response, ingest))."""
     async def fake_run(carro, renda, settings):
-        parsed = {
+        response = {
             "mcqueenAnalysis": "Kachow!",
             "pistasPerigosas": ["a", "b"],
             "veredito": "Pode acelerar",
             "tcoData": [],
             "_meta": {"error": None, "from_web": False},
         }
-        return parsed, False
+        return response, None
 
     monkeypatch.setattr("app.main.run_mcqueen", fake_run)
     r = client.post("/mcqueen-tco", json={"carro": "Civic 2018", "renda": 8000})
@@ -51,13 +51,40 @@ def test_mcqueen_happy_path(client, monkeypatch):
     assert body["pistasPerigosas"] == ["a", "b"]
 
 
-def test_analista_happy_path(client, monkeypatch):
-    async def fake_run(car_model, renda, settings):
+def test_analista_cache_hit_nao_chama_llm(client, monkeypatch):
+    async def fake_get(car_key, settings):
+        return {"car_key": "civic", "carro": "Civic",
+                "content": "c", "facts": {"pistasPerigosas": [],
+                "tcoData": [{"categoria": "X", "item": "IPVA", "valor": "R$ 1", "impacto": "Baixo"}]}}
+
+    called = {"v": False}
+
+    async def fake_analista(car_model, renda, settings):
+        called["v"] = True
+        return []
+
+    monkeypatch.setattr("app.main.get_knowledge", fake_get)
+    monkeypatch.setattr("app.main.run_analista", fake_analista)
+    r = client.post("/analista", json={"carModel": "Civic", "context": {"renda": "X"}})
+    assert r.status_code == 200
+    assert called["v"] is False
+    assert r.json()[0]["item"] == "IPVA"
+
+
+def test_analista_cache_miss_chama_llm(client, monkeypatch):
+    async def fake_get(car_key, settings):
+        return None
+
+    async def fake_find(query, year, settings):
+        return None
+
+    async def fake_analista(car_model, renda, settings):
         return [{"categoria": "X", "item": "IPVA", "valor": "R$ 1", "impacto": "Baixo"}]
 
-    monkeypatch.setattr("app.main.run_analista", fake_run)
+    monkeypatch.setattr("app.main.get_knowledge", fake_get)
+    monkeypatch.setattr("app.main.find_semantic", fake_find)
+    monkeypatch.setattr("app.main.run_analista", fake_analista)
     r = client.post("/analista", json={"carModel": "Civic", "context": {"renda": "X"}})
     assert r.status_code == 200
     body = r.json()
-    assert isinstance(body, list)
     assert body[0]["item"] == "IPVA"
