@@ -23,3 +23,4 @@ def test_settings_loads_from_env(monkeypatch):
     assert s.cors_origins_list == ["http://a.com", "http://b.com"]
     assert s.supabase_match_table == "mcqueen_documents"  # default
     assert s.supabase_embedding_dim == 1536               # default
+    assert s.supabase_upsert_rpc == "upsert_mcqueen_document"      # default

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_service_role_key: str
     supabase_insert_rpc: str = "insert_mcqueen_document"
+    supabase_upsert_rpc: str = "upsert_mcqueen_document"
     supabase_match_rpc: str = "match_mcqueen_documents"
     supabase_match_table: str = "mcqueen_documents"
     supabase_embedding_dim: int = 1536
