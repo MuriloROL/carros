@@ -1,24 +1,23 @@
 """
-Agente McQueen — replica o AI Agent do n8n usando create_agent do LangChain 0.3.
+Roteador McQueen determinístico (substitui o create_agent do LangChain).
 
-Tools: Busca_Interna (Supabase pgvector) e Google_Search (SerpAPI).
-Detecta uso de Google_Search inspecionando intermediate steps -> dispara ingestao.
+Fluxo: canonical_key -> get_knowledge (lookup exato) -> find_semantic (fallback
+com trava de ano) -> na falta, SerpAPI + LLM e devolve payload de ingest.
+No hit, 1 LLM curto recomputa o veredito personalizado à renda.
 """
 from __future__ import annotations
 import logging
-from typing import Any
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import Settings
 from app.llm import build_chat_model
 from app.parsing import parse_mcqueen_output
-from app.tools.busca_interna import busca_interna
-from app.tools.google_search import google_search
+from app.cache_key import canonical_key, extract_year
+from app.knowledge import get_knowledge, find_semantic
+from app.tools.google_search import google_search_impl
 
 logger = logging.getLogger(__name__)
 
-# System prompt — identico ao do n8n.json (modulo encoding)
 MCQUEEN_SYSTEM = """\
 Voce e o RELAMPAGO McQUEEN, o lendario campeao da Copa Pistao. Sua missao e analisar a viabilidade de compra de um carro USADO para um cliente considerando a renda mensal dele.
 
@@ -35,12 +34,6 @@ A renda informada e MENSAL. Antes de dar veredito, faca esta avaliacao de bolso:
    b) O cliente e MUITO POBRE e a manutencao vai afundar ele financeiramente.
 - Em TODO o resto, APROVE com entusiasmo.
 
-=== FERRAMENTAS (uso DISCIPLINADO) ===
-Voce pode chamar NO MAXIMO 2 ferramentas. Nao repita a mesma ferramenta.
-1. Busca_Interna: chame PRIMEIRO. Passe o modelo+ano do carro como query.
-2. Google_Search: chame APENAS se Busca_Interna retornar 'NENHUM_RESULTADO_RELEVANTE'.
-Apos no maximo 2 chamadas, produza a resposta final em JSON. Se voce nao tem certeza absoluta de um numero, ESTIME com base no mercado brasileiro 2026 — estimativa e melhor que loop.
-
 === O QUE INVESTIGAR ===
 1. Defeitos cronicos do modelo (problemas de motor, cambio, suspensao tipicos daquele carro);
 2. Custos do TCO anual: IPVA, Seguro, Manutencao, Combustivel;
@@ -48,8 +41,6 @@ Apos no maximo 2 chamadas, produza a resposta final em JSON. Se voce nao tem cer
 
 === FORMATO DE SAIDA (OBRIGATORIO E ESTRITO) ===
 Responda EXCLUSIVAMENTE com um JSON valido. Sem markdown, sem ```json, sem texto antes ou depois. Use APENAS aspas duplas. Use virgulas corretas, sem trailing commas.
-
-Se em qualquer momento voce usou Google_Search, anexe " [FONTE: WEB]" ao final do campo mcqueenAnalysis.
 
 Estrutura EXATA da resposta final:
 {
@@ -76,105 +67,98 @@ REGRAS DO JSON:
 """
 
 
-def _user_prompt(carro: str, renda: float) -> str:
-    renda_fmt = f"R$ {renda:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def _fmt_renda(renda: float) -> str:
+    return f"R$ {renda:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _search_query(carro: str) -> str:
+    return f"{carro} problemas comuns defeitos manutencao IPVA seguro consumo"
+
+
+def _build_knowledge(parsed: dict, carro: str, web: str) -> str:
+    """Documento factual RENDA-INDEPENDENTE que vai pro vector store."""
+    pistas = "\n".join(f"- {p}" for p in parsed.get("pistasPerigosas") or []) or "- (nenhuma)"
+    tco = "\n".join(
+        f"- {t.get('categoria','')} | {t.get('item','')}: {t.get('valor','')} (impacto {t.get('impacto','')})"
+        for t in parsed.get("tcoData") or []
+    )
     return (
-        f'Analise a viabilidade de compra do carro USADO "{carro}" '
-        f'para um cliente com renda mensal de {renda_fmt}. '
-        f'Use Busca_Interna PRIMEIRO. Se vier vazio, use Google_Search. '
-        f'Depois entregue APENAS o JSON estrito definido no system message.'
+        f"CARRO: {carro}\n\n"
+        f"PISTAS PERIGOSAS:\n{pistas}\n\n"
+        f"TCO:\n{tco}\n\n"
+        f"PESQUISA WEB:\n{web}"
     )
 
 
-def _detect_google_search_used(messages: list[Any]) -> bool:
-    for msg in messages:
-        # AIMessage com tool_calls invocando google_search
-        tool_calls = getattr(msg, "tool_calls", None) or []
-        for tc in tool_calls:
-            name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", None)
-            if name and name.lower() in ("google_search",):
-                return True
-        # ToolMessage emitida pela google_search
-        if isinstance(msg, ToolMessage):
-            if (getattr(msg, "name", "") or "").lower() == "google_search":
-                return True
-    return False
-
-
-def _extract_final_text(messages: list[Any]) -> str:
-    """Pega o conteudo da ultima AIMessage sem tool_calls."""
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage) and not (getattr(msg, "tool_calls", None) or []):
-            content = msg.content
-            if isinstance(content, str):
-                return content
-            # content pode vir como lista de blocks
-            if isinstance(content, list):
-                return "".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in content)
-    return ""
-
-
-async def run_mcqueen(carro: str, renda: float, settings: Settings) -> tuple[dict, bool]:
-    """
-    Executa o agente. Retorna (parsed_response, from_web).
-    parsed_response sempre tem o shape esperado (graca ao parser defensivo).
-    """
-    model = build_chat_model(settings, json_mode=False)
-    # json_mode=False aqui porque o LLM precisa emitir tool_calls (JSON estrito
-    # no mode aplica ao output final apenas). O system prompt ja exige JSON.
-
-    agent = create_agent(
-        model=model,
-        tools=[busca_interna, google_search],
+async def verdict_llm(doc: dict, renda: float, settings: Settings) -> dict:
+    """Cache hit: recomputa só o veredito/analise pra renda atual, sem tools/web."""
+    model = build_chat_model(settings, json_mode=True)
+    facts = doc.get("facts") or {}
+    user = (
+        f'Conhecimento factual ja levantado sobre o carro "{doc.get("carro")}":\n\n'
+        f'{doc.get("content")}\n\n'
+        f'Pistas perigosas conhecidas: {facts.get("pistasPerigosas")}\n'
+        f'TCO conhecido: {facts.get("tcoData")}\n\n'
+        f'O cliente tem renda mensal de {_fmt_renda(renda)}. Com base SOMENTE nesses fatos '
+        f'(nao invente custos novos), produza o JSON McQueen final personalizado pra essa renda. '
+        f'Reaproveite pistasPerigosas e tcoData exatamente como estao.'
     )
+    resp = await model.ainvoke([SystemMessage(content=MCQUEEN_SYSTEM), HumanMessage(content=user)])
+    raw = resp.content if isinstance(resp.content, str) else str(resp.content)
+    parsed = parse_mcqueen_output(raw)
+    # Os fatos salvos são a fonte de verdade pros campos renda-independentes.
+    if facts.get("pistasPerigosas"):
+        parsed["pistasPerigosas"] = facts["pistasPerigosas"]
+    if facts.get("tcoData"):
+        parsed["tcoData"] = facts["tcoData"]
+    parsed["_meta"]["from_web"] = False
+    return parsed
 
-    inputs = {
-        "messages": [
-            SystemMessage(content=MCQUEEN_SYSTEM),
-            HumanMessage(content=_user_prompt(carro, renda)),
-        ]
+
+async def mcqueen_llm(web: str, carro: str, renda: float, settings: Settings) -> str:
+    """Cache miss: gera o McQueen completo a partir da pesquisa web."""
+    model = build_chat_model(settings, json_mode=True)
+    user = (
+        f'Analise a viabilidade de compra do carro USADO "{carro}" pra um cliente com renda '
+        f'mensal de {_fmt_renda(renda)}.\n\n'
+        f'Resultados de pesquisa na web:\n{web}\n\n'
+        f'Produza APENAS o JSON estrito definido no system message.'
+    )
+    resp = await model.ainvoke([SystemMessage(content=MCQUEEN_SYSTEM), HumanMessage(content=user)])
+    return resp.content if isinstance(resp.content, str) else str(resp.content)
+
+
+async def run_mcqueen(carro: str, renda: float, settings: Settings) -> tuple[dict, dict | None]:
+    """
+    Roteador determinístico. Retorna (response, ingest).
+    ingest é None no cache hit; no miss é o payload p/ upsert_knowledge.
+    """
+    key = canonical_key(carro)
+    year = extract_year(carro)
+
+    doc = await get_knowledge(key, settings)
+    if doc is None:
+        doc = await find_semantic(carro, year, settings)
+
+    if doc is not None:
+        # ── CACHE HIT ──
+        parsed = await verdict_llm(doc, renda, settings)
+        return parsed, None
+
+    # ── CACHE MISS ──
+    web = await google_search_impl(_search_query(carro), settings)
+    raw = await mcqueen_llm(web, carro, renda, settings)
+    parsed = parse_mcqueen_output(raw)
+    parsed["_meta"]["from_web"] = True
+
+    facts = {
+        "pistasPerigosas": parsed.get("pistasPerigosas") or [],
+        "tcoData": parsed.get("tcoData") or [],
     }
-    try:
-        result = await agent.ainvoke(
-            inputs,
-            config={"recursion_limit": settings.mcqueen_max_iterations * 2 + 5},
-        )
-    except Exception as exc:
-        logger.warning("mcqueen: agente lancou %s: %s", type(exc).__name__, exc)
-        parsed = parse_mcqueen_output(f"Agent stopped due to {exc}")
-        return parsed, False
-
-    messages = result.get("messages", [])
-    raw_text = _extract_final_text(messages)
-    from_web = _detect_google_search_used(messages)
-
-    # Llama (e outros modelos abertos) as vezes emitem AIMessage final vazia depois de
-    # tool calls. Quando isso acontece, faz uma synthesis call sem tools forcando JSON
-    # mode, passando os outputs das tools como contexto.
-    if not raw_text.strip():
-        logger.info("mcqueen: AIMessage final vazia, executando synthesis call")
-        synth_model = build_chat_model(settings, json_mode=True)
-        tool_outputs = "\n\n".join(
-            f"Resultado de {getattr(m, 'name', '?') or '?'}:\n{m.content}"
-            for m in messages if isinstance(m, ToolMessage)
-        ) or "(nenhuma ferramenta retornou conteudo util)"
-        synth_messages = [
-            SystemMessage(content=MCQUEEN_SYSTEM),
-            HumanMessage(content=_user_prompt(carro, renda)),
-            HumanMessage(content=(
-                "Voce ja consultou as ferramentas. Resultados coletados:\n\n"
-                f"{tool_outputs}\n\n"
-                "Agora produza APENAS o JSON final estrito definido no system prompt. "
-                "Sem markdown, sem texto antes ou depois."
-            )),
-        ]
-        try:
-            synth = await synth_model.ainvoke(synth_messages)
-            raw_text = synth.content if isinstance(synth.content, str) else str(synth.content)
-        except Exception as exc:
-            logger.warning("mcqueen: synthesis call falhou: %s", exc)
-
-    parsed = parse_mcqueen_output(raw_text)
-    from_web = from_web or parsed["_meta"].get("from_web", False)
-    parsed["_meta"]["from_web"] = from_web
-    return parsed, from_web
+    ingest = {
+        "car_key": key,
+        "carro": carro,
+        "content": _build_knowledge(parsed, carro, web),
+        "facts": facts,
+    }
+    return parsed, ingest

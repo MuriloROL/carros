@@ -3,6 +3,7 @@ import respx
 import httpx
 
 from app.config import Settings
+from app.agents import mcqueen
 from app.agents.mcqueen import run_mcqueen
 
 
@@ -15,7 +16,6 @@ def _settings() -> Settings:
         serpapi_base_url="https://serpapi.test/search",
         supabase_url="https://supa.test",
         supabase_service_role_key="supa-key",
-        mcqueen_max_iterations=3,
     )
 
 
@@ -28,40 +28,74 @@ def _completion(content: str) -> dict:
 
 
 VALID_JSON = (
-    '{"mcqueenAnalysis":"Kachow! Bom carro pra esse bolso.",'
-    '"pistasPerigosas":["Junta homocinetica desgasta cedo.",'
-    '"Sensor de oxigenio frequentemente falha."],'
+    '{"mcqueenAnalysis":"Kachow! Bom carro.",'
+    '"pistasPerigosas":["Junta homocinetica desgasta cedo.","Sensor de O2 falha."],'
     '"veredito":"Pode acelerar",'
     '"tcoData":[{"categoria":"Custo Fixo","item":"IPVA","valor":"R$ 1.200","impacto":"Baixo"}]}'
 )
 
 
 @pytest.mark.asyncio
-async def test_mcqueen_path_feliz_sem_tool():
+async def test_run_mcqueen_cache_hit_nao_pesquisa_nem_ingere(monkeypatch):
+    """Hit: usa o conhecimento salvo, chama 1 LLM de veredito, não retorna ingest."""
     s = _settings()
+
+    async def fake_get(car_key, settings):
+        return {"car_key": "civic-2018", "carro": "Civic 2018", "content": "perfil factual",
+                "facts": {"pistasPerigosas": ["pista salva"], "tcoData": [{"item": "IPVA"}]}}
+
+    monkeypatch.setattr(mcqueen, "get_knowledge", fake_get)
+
+    serp_called = {"v": False}
+
+    async def fake_serp(query, settings):
+        serp_called["v"] = True
+        return "nao deveria ser chamado"
+
+    monkeypatch.setattr(mcqueen, "google_search_impl", fake_serp)
+
     with respx.mock() as router:
-        # O agente deve resolver na primeira chamada — o LLM nao usa tool.
         router.post("https://openrouter.test/v1/chat/completions").mock(
             return_value=httpx.Response(200, json=_completion(VALID_JSON))
         )
-        result, from_web = await run_mcqueen(carro="Civic 2018", renda=8000.0, settings=s)
+        response, ingest = await run_mcqueen(carro="Civic 2018", renda=8000.0, settings=s)
 
-    assert result["veredito"] == "Pode acelerar"
-    assert len(result["pistasPerigosas"]) == 2
-    assert from_web is False
+    assert ingest is None
+    assert serp_called["v"] is False
+    assert response["veredito"] == "Pode acelerar"
+    # pistasPerigosas/tcoData vêm dos fatos salvos (fonte de verdade)
+    assert response["pistasPerigosas"] == ["pista salva"]
+    assert response["tcoData"] == [{"item": "IPVA"}]
 
 
 @pytest.mark.asyncio
-async def test_mcqueen_fallback_em_max_iterations():
-    """Se o LLM ficar em loop sem responder JSON, o parser cai pro fallback."""
+async def test_run_mcqueen_cache_miss_pesquisa_e_devolve_ingest(monkeypatch):
+    """Miss: pesquisa web + gera, e devolve payload de ingest com a car_key."""
     s = _settings()
-    with respx.mock() as router:
-        # Simula o LLM nunca chegando num JSON, gerando o erro tipico
-        router.post("https://openrouter.test/v1/chat/completions").mock(
-            return_value=httpx.Response(200,
-                json=_completion("Agent stopped due to max iterations."))
-        )
-        result, from_web = await run_mcqueen(carro="X", renda=1000.0, settings=s)
 
-    assert result["veredito"] == "Indefinido"
-    assert result["_meta"]["error"] in ("max_iterations", "json_parse_failed")
+    async def fake_get(car_key, settings):
+        return None
+
+    async def fake_find(query, year, settings):
+        return None
+
+    monkeypatch.setattr(mcqueen, "get_knowledge", fake_get)
+    monkeypatch.setattr(mcqueen, "find_semantic", fake_find)
+
+    with respx.mock() as router:
+        serp = router.get("https://serpapi.test/search").mock(
+            return_value=httpx.Response(200, json={"organic_results": [
+                {"title": "T", "snippet": "Civic 2018 IPVA R$ 1.200"},
+            ]})
+        )
+        router.post("https://openrouter.test/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json=_completion(VALID_JSON))
+        )
+        response, ingest = await run_mcqueen(carro="Civic 2018", renda=8000.0, settings=s)
+
+    assert serp.called
+    assert response["veredito"] == "Pode acelerar"
+    assert ingest is not None
+    assert ingest["car_key"] == "civic-2018"
+    assert ingest["facts"]["pistasPerigosas"] == response["pistasPerigosas"]
+    assert "Civic 2018 IPVA" in ingest["content"]  # snippet web entra no conhecimento
