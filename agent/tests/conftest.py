@@ -18,7 +18,6 @@ def make_test_settings(**overrides) -> Settings:
         serpapi_base_url="https://serpapi.test/search",
         supabase_url="https://supa.test",
         supabase_service_role_key="supa-key",
-        mcqueen_max_iterations=3,
     )
     defaults.update(overrides)
     return Settings(**defaults)

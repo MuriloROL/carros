@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     # Supabase
     supabase_url: str
     supabase_service_role_key: str
-    supabase_insert_rpc: str = "insert_mcqueen_document"
     supabase_upsert_rpc: str = "upsert_mcqueen_document"
     supabase_match_rpc: str = "match_mcqueen_documents"
     supabase_match_table: str = "mcqueen_documents"
@@ -42,9 +41,6 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:4173"
     cors_origin_regex: str = ""
     log_level: str = "info"
-
-    # Agente
-    mcqueen_max_iterations: int = 10
     http_timeout_seconds: float = 30.0
 
     @property

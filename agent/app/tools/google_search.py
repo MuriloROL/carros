@@ -1,6 +1,6 @@
 """
-Tool Google_Search via SerpAPI. So eh chamada se a Busca_Interna
-retornou NENHUM_RESULTADO_RELEVANTE (regra do system prompt).
+Busca na web via SerpAPI. Chamada diretamente por codigo (nao e mais uma tool de
+LLM) no caminho de cache miss do roteador McQueen.
 """
 from __future__ import annotations
 import logging
