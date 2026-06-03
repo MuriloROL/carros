@@ -36,3 +36,19 @@ class SupabaseClient:
             resp = await http.post(url, json=body, headers=headers)
             resp.raise_for_status()
             return resp.json()
+
+    async def select_one(self, table: str, filters: dict, select: str = "*") -> dict | None:
+        """GET PostgREST por igualdade. Retorna a 1ª linha ou None."""
+        url = f"{self.settings.supabase_url}/rest/v1/{table}"
+        params = {"select": select, "limit": "1"}
+        for col, val in filters.items():
+            params[col] = f"eq.{val}"
+        headers = {
+            "apikey": self.settings.supabase_service_role_key,
+            "Authorization": f"Bearer {self.settings.supabase_service_role_key}",
+        }
+        async with httpx.AsyncClient(timeout=self.settings.http_timeout_seconds) as http:
+            resp = await http.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+            rows = resp.json()
+            return rows[0] if rows else None

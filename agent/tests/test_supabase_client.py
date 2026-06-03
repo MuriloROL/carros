@@ -61,6 +61,30 @@ async def test_call_rpc_match_documents():
 
 
 @pytest.mark.asyncio
+async def test_select_one_retorna_primeira_linha_ou_none():
+    from app.supabase_client import SupabaseClient
+    s = Settings(
+        openrouter_api_key="or", serpapi_api_key="serp",
+        supabase_url="https://supa.test", supabase_service_role_key="k",
+    )
+    client = SupabaseClient(s)
+
+    with respx.mock() as router:
+        router.get("https://supa.test/rest/v1/mcqueen_documents").mock(
+            return_value=httpx.Response(200, json=[{"car_key": "civic-2015", "carro": "Civic 2015"}])
+        )
+        row = await client.select_one("mcqueen_documents", {"car_key": "civic-2015"}, select="car_key,carro")
+    assert row["carro"] == "Civic 2015"
+
+    with respx.mock() as router:
+        router.get("https://supa.test/rest/v1/mcqueen_documents").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+        row = await client.select_one("mcqueen_documents", {"car_key": "inexistente"})
+    assert row is None
+
+
+@pytest.mark.asyncio
 async def test_call_rpc_raises_on_4xx():
     settings = _settings()
     client = SupabaseClient(settings)
