@@ -32,8 +32,8 @@ def _strip_accents(s: str) -> str:
 def canonical_key(name: str) -> str:
     name = _strip_accents(name or "").lower()
     year = extract_year(name)
-    tokens = re.findall(r"[a-z0-9]+", name)
-    tokens = [t for t in tokens if t != year and t not in _STOPWORDS]
+    tokens = re.findall(r"[a-z]+|\d+(?:\.\d+)?", name)
+    tokens = [t for t in tokens if not _YEAR_RE.fullmatch(t) and t not in _STOPWORDS]
     tokens = sorted(set(tokens))
     key = "-".join(tokens)
     if year:

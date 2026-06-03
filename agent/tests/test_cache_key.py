@@ -24,3 +24,14 @@ def test_canonical_inclui_o_ano_na_chave():
 def test_extract_year_acha_e_falta():
     assert extract_year("Gol 2012 flex") == "2012"
     assert extract_year("Gol flex") is None
+
+
+def test_canonical_nao_quebra_cilindrada_decimal():
+    k = canonical_key("Civic 2.0 2015")
+    assert "0-2" not in k        # não pode virar tokens "2" e "0"
+    assert "2.0" in k
+    assert k.endswith("2015")
+
+
+def test_canonical_remove_todos_os_anos_extras():
+    assert canonical_key("Onix 2015 2018") == "onix-2015"
