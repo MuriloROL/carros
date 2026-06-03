@@ -94,3 +94,16 @@ async def test_call_rpc_raises_on_4xx():
         )
         with pytest.raises(httpx.HTTPStatusError):
             await client.call_rpc("match_mcqueen_documents", {})
+
+
+@pytest.mark.asyncio
+async def test_call_rpc_lida_com_204_sem_corpo():
+    """RPC que retorna void responde 204 No Content — não pode estourar no json()."""
+    settings = _settings()
+    client = SupabaseClient(settings)
+    with respx.mock(base_url="https://supa.test") as router:
+        router.post("/rest/v1/rpc/upsert_mcqueen_document").mock(
+            return_value=httpx.Response(204)
+        )
+        out = await client.call_rpc("upsert_mcqueen_document", {"p_car_key": "x"})
+    assert out == {}

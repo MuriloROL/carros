@@ -35,6 +35,9 @@ class SupabaseClient:
         async with httpx.AsyncClient(timeout=self.settings.http_timeout_seconds) as http:
             resp = await http.post(url, json=body, headers=headers)
             resp.raise_for_status()
+            # RPCs que retornam void respondem 204 No Content (corpo vazio).
+            if resp.status_code == 204 or not resp.content:
+                return {}
             return resp.json()
 
     async def select_one(self, table: str, filters: dict, select: str = "*") -> dict | None:
