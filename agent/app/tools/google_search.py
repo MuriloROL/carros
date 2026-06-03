@@ -5,9 +5,7 @@ retornou NENHUM_RESULTADO_RELEVANTE (regra do system prompt).
 from __future__ import annotations
 import logging
 import httpx
-from langchain_core.tools import tool
-
-from app.config import Settings, get_settings
+from app.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +41,3 @@ async def google_search_impl(query: str, settings: Settings) -> str:
             formatted.append(f"- {snippet}")
     return "\n".join(formatted) if formatted else "Sem resultados do Google para esta consulta."
 
-
-@tool("Google_Search", description=(
-    "Busca informacoes sobre carros usados no Google via SerpAPI. "
-    "Use APENAS se Busca_Interna retornou 'NENHUM_RESULTADO_RELEVANTE'. "
-    "Passe modelo + ano + termo (ex: 'Honda Civic 2018 problemas comuns')."
-))
-async def google_search(query: str) -> str:
-    return await google_search_impl(query, get_settings())
