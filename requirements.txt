@@ -1,0 +1,3 @@
+# Dependências da Serverless Function Python da Vercel (api/index.py).
+# Reaproveita o lock do agente para não duplicar versões.
+-r agent/requirements.txt

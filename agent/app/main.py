@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from fastapi import BackgroundTasks, Depends, FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -44,14 +44,17 @@ async def health():
 @app.post("/mcqueen-tco")
 async def mcqueen_tco(
     payload: McqueenRequest,
-    background: BackgroundTasks,
     settings: Settings = Depends(get_settings),
 ):
     response, ingest = await run_mcqueen(
         carro=payload.carro, renda=payload.renda, settings=settings
     )
     if ingest is not None:
-        background.add_task(upsert_knowledge, settings=settings, **ingest)
+        # Em serverless (Vercel) a função é congelada assim que a resposta sai,
+        # então um BackgroundTask não rodaria. Fazemos o upsert antes de
+        # responder — ele já trata erro internamente (falha silenciosa), então
+        # não há risco de quebrar a resposta ao cliente.
+        await upsert_knowledge(settings=settings, **ingest)
 
     return JSONResponse({
         "mcqueenAnalysis": response.get("mcqueenAnalysis", ""),

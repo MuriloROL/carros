@@ -45,5 +45,8 @@ agent/__pycache__/
 agent/**/__pycache__/
 agent/.pytest_cache/
 
+# serverless function python (Vercel)
+api/__pycache__/
+
 # docs de processo (specs/plans) — mantidos no disco, fora do versionamento
 /docs/

@@ -23,7 +23,12 @@ export interface CarAnalysisData extends McqueenResponse {
   chronicProblems: string[];
 }
 
-const API_BASE = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
+// Em produção (build na Vercel) o backend é servido na mesma origem sob `/api`
+// (ver vercel.json + api/index.py). Em dev cai no agente local. VITE_API_URL,
+// se definida, sempre tem prioridade.
+const API_BASE = (
+  import.meta.env.VITE_API_URL ?? (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
+).replace(/\/$/, '');
 const MCQUEEN_WEBHOOK = `${API_BASE}/mcqueen-tco`;
 const ANALISTA_WEBHOOK = `${API_BASE}/analista`;
 
