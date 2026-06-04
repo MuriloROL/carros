@@ -9,6 +9,7 @@ from app.schemas import McqueenRequest, AnalistaRequest
 from app.agents.mcqueen import run_mcqueen
 from app.agents.analista import run_analista
 from app.cache_key import canonical_key, extract_year
+from app.ipva import apply_ipva_exemption
 from app.knowledge import get_knowledge, find_semantic, upsert_knowledge
 
 logging.basicConfig(level=logging.INFO,
@@ -73,11 +74,12 @@ async def analista(
         doc = await find_semantic(payload.car_model, year, settings)
 
     if doc and (doc.get("facts") or {}).get("tcoData"):
-        return JSONResponse(doc["facts"]["tcoData"])
+        tco = apply_ipva_exemption(doc["facts"]["tcoData"], year)
+        return JSONResponse(tco)
 
     items = await run_analista(
         car_model=payload.car_model,
         renda=payload.context.renda,
         settings=settings,
     )
-    return JSONResponse(items)
+    return JSONResponse(apply_ipva_exemption(items, year))

@@ -71,6 +71,20 @@ def test_analista_cache_hit_nao_chama_llm(client, monkeypatch):
     assert r.json()[0]["item"] == "IPVA"
 
 
+def test_analista_zera_ipva_carro_antigo(client, monkeypatch):
+    """Carro com mais de 20 anos (Corcel 1976): a rota zera o IPVA do cache."""
+    async def fake_get(car_key, settings):
+        return {"car_key": "corcel-1976", "carro": "Corcel 1976", "content": "c",
+                "facts": {"pistasPerigosas": [],
+                "tcoData": [{"categoria": "Custo Fixo", "item": "IPVA",
+                             "valor": "R$ 800", "impacto": "Medio"}]}}
+
+    monkeypatch.setattr("app.main.get_knowledge", fake_get)
+    r = client.post("/analista", json={"carModel": "Corcel 1976", "context": {"renda": "X"}})
+    assert r.status_code == 200
+    assert r.json()[0]["valor"] == "Isento"
+
+
 def test_mcqueen_miss_agenda_ingest(client, monkeypatch):
     """No cache miss, run_mcqueen devolve ingest != None e a rota agenda o upsert."""
     async def fake_run(carro, renda, settings):

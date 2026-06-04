@@ -13,6 +13,7 @@ from app.config import Settings
 from app.llm import build_chat_model
 from app.parsing import parse_mcqueen_output
 from app.cache_key import canonical_key, extract_year
+from app.ipva import apply_ipva_exemption
 from app.knowledge import get_knowledge, find_semantic
 from app.tools.google_search import google_search_impl
 
@@ -38,6 +39,9 @@ A renda informada e MENSAL. Antes de dar veredito, faca esta avaliacao de bolso:
 1. Defeitos cronicos do modelo (problemas de motor, cambio, suspensao tipicos daquele carro);
 2. Custos do TCO anual: IPVA, Seguro, Manutencao, Combustivel;
 3. Impacto do TCO mensal sobre a renda do cliente — mas com bom senso, nao com formula cega.
+
+=== ISENCAO DE IPVA (REGRA IMPORTANTE) ===
+No Brasil, veiculos com MAIS de 20 anos sao geralmente ISENTOS de IPVA. Hoje (ano 2026), isso vale para modelos de 2005 ou mais antigos. Se o carro tiver mais de 20 anos, a linha do IPVA no tcoData deve ter "valor": "Isento" e "impacto": "Baixo" — NUNCA invente um valor de IPVA para carro antigo. Carros de 2006 em diante ainda pagam IPVA normalmente.
 
 === FORMATO DE SAIDA (OBRIGATORIO E ESTRITO) ===
 Responda EXCLUSIVAMENTE com um JSON valido. Sem markdown, sem ```json, sem texto antes ou depois. Use APENAS aspas duplas. Use virgulas corretas, sem trailing commas.
@@ -143,6 +147,9 @@ async def run_mcqueen(carro: str, renda: float, settings: Settings) -> tuple[dic
     if doc is not None:
         # ── CACHE HIT ──
         parsed = await verdict_llm(doc, renda, settings)
+        # Ano da query ou, na falta, do nome salvo no banco (busca semântica).
+        doc_year = year or extract_year(doc.get("carro") or "")
+        parsed["tcoData"] = apply_ipva_exemption(parsed.get("tcoData") or [], doc_year)
         return parsed, None
 
     # ── CACHE MISS ──
@@ -150,6 +157,8 @@ async def run_mcqueen(carro: str, renda: float, settings: Settings) -> tuple[dic
     raw = await mcqueen_llm(web, carro, renda, settings)
     parsed = parse_mcqueen_output(raw)
     parsed["_meta"]["from_web"] = True
+    # Trava determinística: corrige o IPVA antes de exibir E antes de salvar nos fatos.
+    parsed["tcoData"] = apply_ipva_exemption(parsed.get("tcoData") or [], year)
 
     facts = {
         "pistasPerigosas": parsed.get("pistasPerigosas") or [],

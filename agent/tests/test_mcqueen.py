@@ -68,6 +68,46 @@ async def test_run_mcqueen_cache_hit_nao_pesquisa_nem_ingere(monkeypatch):
     assert response["tcoData"] == [{"item": "IPVA"}]
 
 
+OLD_CAR_JSON = (
+    '{"mcqueenAnalysis":"Kachow! Classico.",'
+    '"pistasPerigosas":["Ferrugem nas longarinas.","Pecas raras."],'
+    '"veredito":"Pode acelerar",'
+    '"tcoData":[{"categoria":"Custo Fixo","item":"IPVA","valor":"R$ 800","impacto":"Medio"}]}'
+)
+
+
+@pytest.mark.asyncio
+async def test_run_mcqueen_zera_ipva_de_carro_isento_no_miss(monkeypatch):
+    """Carro com mais de 20 anos (Corcel 1976): IPVA zerado na resposta e no ingest."""
+    s = _settings()
+
+    async def fake_get(car_key, settings):
+        return None
+
+    async def fake_find(query, year, settings):
+        return None
+
+    monkeypatch.setattr(mcqueen, "get_knowledge", fake_get)
+    monkeypatch.setattr(mcqueen, "find_semantic", fake_find)
+
+    with respx.mock() as router:
+        router.get("https://serpapi.test/search").mock(
+            return_value=httpx.Response(200, json={"organic_results": [
+                {"title": "T", "snippet": "Corcel 1976 IPVA"},
+            ]})
+        )
+        router.post("https://openrouter.test/v1/chat/completions").mock(
+            return_value=httpx.Response(200, json=_completion(OLD_CAR_JSON))
+        )
+        response, ingest = await run_mcqueen(carro="Ford Corcel 1976", renda=8000.0, settings=s)
+
+    ipva = next(r for r in response["tcoData"] if r["item"] == "IPVA")
+    assert ipva["valor"] == "Isento"
+    # O conhecimento salvo também vai corrigido (não perpetua IPVA inventado).
+    ipva_ingest = next(r for r in ingest["facts"]["tcoData"] if r["item"] == "IPVA")
+    assert ipva_ingest["valor"] == "Isento"
+
+
 @pytest.mark.asyncio
 async def test_run_mcqueen_cache_miss_pesquisa_e_devolve_ingest(monkeypatch):
     """Miss: pesquisa web + gera, e devolve payload de ingest com a car_key."""
