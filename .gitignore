@@ -44,3 +44,6 @@ agent/.venv/
 agent/__pycache__/
 agent/**/__pycache__/
 agent/.pytest_cache/
+
+# docs de processo (specs/plans) — mantidos no disco, fora do versionamento
+/docs/
